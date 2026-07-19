@@ -15,7 +15,7 @@ Render routes and markers on AMap (Gaode / 高德地图) Web JS API 2.0 vector m
 
 - Native AMap vector rendering without an iframe, external page, or self-managed tile server.
 - Routes and circle markers configured per Grafana query `refId`.
-- Optional WGS-84 to GCJ-02 conversion in the browser.
+- Optional WGS-84 to GCJ-02 conversion through the official AMap JS API.
 - Latitude and longitude field matching, per-query styles, and text-only hover tooltips.
 - Grafana light/dark theme synchronization, toolbar, scale control, and automatic fit-to-data.
 

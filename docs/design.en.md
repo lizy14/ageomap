@@ -27,7 +27,7 @@ flowchart LR
     O["Panel options<br/>credentials, fields, refId, styles"]
     P["Ageomap React panel"]
     V["Field matching and<br/>coordinate validation"]
-    C["Optional WGS-84 → GCJ-02"]
+    C["Official AMap.convertFrom<br/>Optional WGS-84 → GCJ-02"]
     L["AMap SDK singleton loader"]
     M["AMap Map<br/>Polyline / CircleMarker / InfoWindow"]
     A["AMap Web JS API 2.0"]
@@ -44,9 +44,11 @@ All map processing occurs in the browser inside the Grafana page:
 
 1. The React panel reads Grafana DataFrames and panel options.
 2. Each DataFrame is resolved by `refId` as `route`, `marker`, or `none`.
-3. The panel matches coordinate fields, discards invalid coordinates, and optionally converts them.
-4. The SDK loader fetches AMap Web JS API 2.0 over HTTPS.
-5. The panel renders native AMap `Polyline`, `CircleMarker`, and `InfoWindow` objects.
+3. The panel matches coordinate fields and discards invalid coordinates.
+4. WGS-84 data is converted to GCJ-02 asynchronously in batches through the official
+   `AMap.convertFrom` API.
+5. The SDK loader fetches AMap Web JS API 2.0 over HTTPS.
+6. The panel renders native AMap `Polyline`, `CircleMarker`, and `InfoWindow` objects.
 
 The project has no backend component, iframe, external page, or self-managed tile server.
 
@@ -59,6 +61,11 @@ an anonymous AMD module and leave `window.AMap` unavailable. The loader temporar
 The SDK is loaded once per page. Matching credentials reuse the load result; different credentials
 produce an explicit error requiring a Grafana page reload. Load failures and the 15-second timeout
 are displayed in the panel.
+
+Official coordinate conversion runs sequentially in batches of up to 40 coordinate pairs. Data or
+option changes supersede older conversions; after the current request completes, stale work submits
+no further batches and cannot overwrite the newer map. Conversion failures and the 15-second
+timeout are displayed in the panel.
 
 When the panel is destroyed, it removes overlays, closes tooltips, and destroys the map instance.
 Panel size changes resize the map. Data, theme, and style changes redraw overlays, and auto-fit
@@ -85,7 +92,8 @@ dashboard JSON, snapshots, or repositories containing credentials.
 - Coordinates and tooltip fields are read in the browser.
 - Empty, non-numeric, and out-of-range coordinates are not passed to map overlays.
 - Hover content uses DOM `textContent`; query values are never executed as HTML.
-- WGS-84 to GCJ-02 conversion occurs in the browser; coordinates outside China remain unchanged.
+- WGS-84 data is handled by the official `AMap.convertFrom` API. Network processing by the SDK is
+  governed by AMap services and their applicable terms.
 
 ## Current limitations
 
@@ -114,7 +122,6 @@ their affiliates.
 
 ## License
 
-The Ageomap source code is licensed under the [Apache License 2.0](../LICENSE). See
-[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for third-party code notices. The license
-applies only to Ageomap source code; use of AMap services remains subject to the applicable AMap
-terms and requires your own credentials.
+The Ageomap source code is licensed under the [Apache License 2.0](../LICENSE). The license applies
+only to Ageomap source code; use of AMap services remains subject to the applicable AMap terms and
+requires your own credentials.

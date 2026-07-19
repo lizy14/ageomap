@@ -3,7 +3,7 @@ import { PanelProps, DataFrame, Field } from '@grafana/data';
 import { useTheme2 } from '@grafana/ui';
 import { AMapOptions, SeriesMapping } from '../types';
 import { loadAMap } from '../amapLoader';
-import { wgs84ToGcj02 } from '../coord';
+import { convertGpsCoordinates, Coordinate } from '../amapConvert';
 
 interface Props extends PanelProps<AMapOptions> {}
 
@@ -77,7 +77,7 @@ export function createTooltipContent(text: string): HTMLDivElement {
   return content;
 }
 
-export function coordinateAt(latField: Field, lonField: Field, index: number, convert: boolean): [number, number] | null {
+export function coordinateAt(latField: Field, lonField: Field, index: number): Coordinate | null {
   const rawLat = latField.values[index];
   const rawLon = lonField.values[index];
   if (rawLat == null || rawLon == null || (typeof rawLat === 'string' && !rawLat.trim()) || (typeof rawLon === 'string' && !rawLon.trim())) {
@@ -88,7 +88,7 @@ export function coordinateAt(latField: Field, lonField: Field, index: number, co
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     return null;
   }
-  return convert ? wgs84ToGcj02(lat, lon) : [lon, lat];
+  return [lon, lat];
 }
 
 export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) => {
@@ -99,6 +99,7 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
   const overlaysRef = useRef<any[]>([]);
   const toolbarRef = useRef<any>(null);
   const scaleRef = useRef<any>(null);
+  const drawVersionRef = useRef(0);
   const [mapVersion, setMapVersion] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -113,7 +114,8 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
         ? options.darkMapStyle || 'dark'
         : options.lightMapStyle || 'normal';
 
-  const draw = useCallback(() => {
+  const draw = useCallback(async () => {
+    const drawVersion = ++drawVersionRef.current;
     const AMap = window.AMap;
     const map = mapRef.current;
     if (!AMap || !map) {
@@ -123,8 +125,12 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
     overlaysRef.current = [];
 
     const sc = seriesConfig.value;
-    const convert = options.coordSystem !== 'gcj02';
-    const overlays: any[] = [];
+    const prepared: Array<{
+      frame: DataFrame;
+      kind: 'route' | 'marker';
+      cfg: Partial<SeriesMapping>;
+      points: Array<{ rowIndex: number; coordinate: Coordinate }>;
+    }> = [];
 
     (data.series || []).forEach((frame, idx) => {
       const refId = frame.refId || String(idx);
@@ -138,17 +144,45 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
       if (!latF || !lonF) {
         return;
       }
-      const n = latF.values.length;
-
-      if (kind === 'route') {
-        const path: Array<[number, number]> = [];
-        for (let i = 0; i < n; i++) {
-          const coordinate = coordinateAt(latF, lonF, i, convert);
-          if (!coordinate) {
-            continue;
-          }
-          path.push(coordinate);
+      const points: Array<{ rowIndex: number; coordinate: Coordinate }> = [];
+      for (let rowIndex = 0; rowIndex < latF.values.length; rowIndex++) {
+        const coordinate = coordinateAt(latF, lonF, rowIndex);
+        if (coordinate) {
+          points.push({ rowIndex, coordinate });
         }
+      }
+      if (points.length) {
+        prepared.push({ frame, kind, cfg, points });
+      }
+    });
+
+    const rawCoordinates = prepared.flatMap((series) => series.points.map((point) => point.coordinate));
+    let coordinates = rawCoordinates;
+    if (options.coordSystem !== 'gcj02') {
+      try {
+        coordinates = await convertGpsCoordinates(
+          AMap,
+          rawCoordinates,
+          () => drawVersion === drawVersionRef.current && mapRef.current === map
+        );
+      } catch (error) {
+        if (drawVersion === drawVersionRef.current && mapRef.current === map) {
+          setLoadError(error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
+    }
+    if (drawVersion !== drawVersionRef.current || mapRef.current !== map) {
+      return;
+    }
+    setLoadError(null);
+
+    const overlays: any[] = [];
+    let coordinateIndex = 0;
+
+    prepared.forEach(({ frame, kind, cfg, points }) => {
+      if (kind === 'route') {
+        const path = points.map(() => coordinates[coordinateIndex++]);
         if (path.length > 1) {
           const pl = new AMap.Polyline({
             path,
@@ -168,11 +202,8 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
           .map((s) => s.trim())
           .filter(Boolean);
         const labelFields = labelFieldNames.map((nm) => fieldByName(frame, nm));
-        for (let i = 0; i < n; i++) {
-          const pos = coordinateAt(latF, lonF, i, convert);
-          if (!pos) {
-            continue;
-          }
+        for (const point of points) {
+          const pos = coordinates[coordinateIndex++];
           const cm = new AMap.CircleMarker({
             center: pos,
             radius: cfg.radius ?? options.markerRadius ?? 5,
@@ -193,7 +224,7 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
               if (!f) {
                 return;
               }
-              let v: any = f.values[i];
+              let v: any = f.values[point.rowIndex];
               if (v == null) {
                 return;
               }
@@ -222,6 +253,7 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
 
   // Load SDK and create the map instance once.
   useEffect(() => {
+    drawVersionRef.current += 1;
     if (mapRef.current) {
       mapRef.current.destroy();
       mapRef.current = null;
@@ -308,7 +340,7 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
   useEffect(() => {
     if (mapVersion && mapRef.current) {
       mapRef.current.setMapStyle(`amap://styles/${effectiveStyle}`);
-      draw();
+      void draw();
     }
   }, [mapVersion, draw, effectiveStyle]);
 
@@ -321,6 +353,7 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
 
   useEffect(() => {
     return () => {
+      drawVersionRef.current += 1;
       overlaysRef.current.forEach((overlay) => mapRef.current?.remove(overlay));
       overlaysRef.current = [];
       infoRef.current?.close();

@@ -75,12 +75,12 @@ export const plugin = new PanelPlugin<AMapOptions>(SimplePanel).setPanelOptions(
     .addSelect({
       path: 'coordSystem',
       name: '数据坐标系',
-      description: '数据源经纬度的坐标系。WGS84 会自动转成高德的 GCJ-02。',
+      description: '数据源经纬度的坐标系。WGS84 会通过高德官方 API 转成 GCJ-02。',
       category: ['数据映射'],
       defaultValue: 'wgs84',
       settings: {
         options: [
-          { value: 'wgs84', label: 'WGS-84 (GPS原始, 自动纠偏)' },
+          { value: 'wgs84', label: 'WGS-84 (GPS原始, 高德官方转换)' },
           { value: 'gcj02', label: 'GCJ-02 (已是高德坐标)' },
         ],
       },

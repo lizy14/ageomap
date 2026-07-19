@@ -57,6 +57,6 @@ test('rejects invalid nested series configuration', async () => {
 
 test('does not convert missing coordinates to zero', () => {
   const field = (values: unknown[]) => ({ values } as unknown as Field);
-  expect(coordinateAt(field([null]), field([121.5]), 0, false)).toBeNull();
-  expect(coordinateAt(field(['']), field([121.5]), 0, false)).toBeNull();
+  expect(coordinateAt(field([null]), field([121.5]), 0)).toBeNull();
+  expect(coordinateAt(field(['']), field([121.5]), 0)).toBeNull();
 });

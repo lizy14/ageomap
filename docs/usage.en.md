@@ -27,9 +27,10 @@ outside latitude `[-90, 90]` or longitude `[-180, 180]` are ignored.
 4. Configure the latitude and longitude field matchers.
 5. Use the per-`refId` JSON setting to render each query as a route, markers, or nothing.
 
-The default source coordinate system is WGS-84, which the panel converts to AMap's GCJ-02 in the
-browser. Select GCJ-02 when the data is already converted to avoid applying the conversion twice.
-WGS-84 coordinates outside China remain unchanged.
+The default source coordinate system is WGS-84. The panel converts it to GCJ-02 through the
+official `AMap.convertFrom` API. Select GCJ-02 when the data is already converted to avoid applying
+the conversion twice. Conversion runs sequentially in batches of up to 40 coordinate pairs,
+following AMap's per-call limit. Failures and the 15-second timeout are displayed in the panel.
 
 ## Per-query configuration
 

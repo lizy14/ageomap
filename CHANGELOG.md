@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Replace the bundled WGS-84 to GCJ-02 approximation with the official asynchronous
+  `AMap.convertFrom` API.
+- Convert GPS coordinates in batches, surface conversion failures and timeouts, and
+  prevent stale conversion results from updating the map.
+
 ## 0.1.0
 
 Initial beta release.

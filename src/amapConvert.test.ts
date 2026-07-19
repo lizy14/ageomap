@@ -13,8 +13,9 @@ describe('convertGpsCoordinates', () => {
       callback('complete', { info: 'ok', locations: coordinates.map(convertedLocation) });
     });
     const coordinates = Array.from({ length: 41 }, (_, index): [number, number] => [116 + index / 100, 39]);
+    const onBatch = jest.fn();
 
-    const converted = await convertGpsCoordinates({ convertFrom }, coordinates);
+    const converted = await convertGpsCoordinates({ convertFrom }, coordinates, () => true, onBatch);
 
     expect(convertFrom).toHaveBeenCalledTimes(2);
     expect(convertFrom.mock.calls[0][0]).toHaveLength(40);
@@ -22,6 +23,7 @@ describe('convertGpsCoordinates', () => {
     expect(convertFrom.mock.calls[0][1]).toBe('gps');
     expect(converted).toHaveLength(41);
     expect(converted[0]).toEqual([116.01, 39.02]);
+    expect(onBatch.mock.calls.map((call) => call[1])).toEqual([40, 41]);
   });
 
   test('returns without calling AMap when there are no coordinates', async () => {

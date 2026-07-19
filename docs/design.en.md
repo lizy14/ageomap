@@ -62,10 +62,16 @@ The SDK is loaded once per page. Matching credentials reuse the load result; dif
 produce an explicit error requiring a Grafana page reload. Load failures and the 15-second timeout
 are displayed in the panel.
 
-Official coordinate conversion runs sequentially in batches of up to 40 coordinate pairs. Data or
-option changes supersede older conversions; after the current request completes, stale work submits
-no further batches and cannot overwrite the newer map. Conversion failures and the 15-second
-timeout are displayed in the panel.
+Official coordinate conversion runs sequentially in batches of up to 40 coordinate pairs. The plan
+converts markers first, uniformly samples up to 40 points from each route for a coarse preview, then
+fills routes from newest to oldest using the time field. Row order is the fallback when no valid
+time field exists. Previous overlays remain until the preview is ready; the preview then replaces
+them and route paths update after each subsequent batch. The panel displays converted and total
+point counts.
+
+Data or option changes supersede older conversions; after the current request completes, stale work
+submits no further batches and cannot overwrite the newer map. Conversion failures and the
+15-second timeout are displayed in the panel.
 
 When the panel is destroyed, it removes overlays, closes tooltips, and destroys the map instance.
 Panel size changes resize the map. Data, theme, and style changes redraw overlays, and auto-fit

@@ -32,6 +32,17 @@ official `AMap.convertFrom` API. Select GCJ-02 when the data is already converte
 the conversion twice. Conversion runs sequentially in batches of up to 40 coordinate pairs,
 following AMap's per-call limit. Failures and the 15-second timeout are displayed in the panel.
 
+For larger WGS-84 datasets, conversion progresses in this order:
+
+1. Convert all markers first, prioritizing newer rows within each marker series.
+2. Uniformly sample up to 40 points from each route to build a quick preview covering its full range.
+3. Fill in the newest 40 points from each route, then convert the remaining route points.
+
+“Newest” uses the first DataFrame field with type `time`; when no valid time field exists, later row
+indexes are treated as newer. The panel shows “converted / total” progress and retains the previous
+overlays until markers and the coarse route preview are ready. Routes are then refined after each
+batch, with a final auto-fit after all conversion completes.
+
 ## Per-query configuration
 
 The setting is a JSON object keyed by query `refId`:

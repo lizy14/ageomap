@@ -1,6 +1,6 @@
 export type Coordinate = [number, number];
 
-const GPS_CONVERSION_BATCH_SIZE = 40;
+export const GPS_CONVERSION_BATCH_SIZE = 40;
 const GPS_CONVERSION_TIMEOUT_MS = 15000;
 
 function coordinateFromAMap(location: any): Coordinate {
@@ -55,7 +55,8 @@ function convertBatch(AMap: any, coordinates: Coordinate[]): Promise<Coordinate[
 export async function convertGpsCoordinates(
   AMap: any,
   coordinates: Coordinate[],
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  onBatch?: (batch: Coordinate[], convertedCount: number) => void
 ): Promise<Coordinate[]> {
   const converted: Coordinate[] = [];
   for (let offset = 0; offset < coordinates.length; offset += GPS_CONVERSION_BATCH_SIZE) {
@@ -63,7 +64,12 @@ export async function convertGpsCoordinates(
       throw new Error('AMap coordinate conversion was superseded by newer data');
     }
     const batch = coordinates.slice(offset, offset + GPS_CONVERSION_BATCH_SIZE);
-    converted.push(...(await convertBatch(AMap, batch)));
+    const convertedBatch = await convertBatch(AMap, batch);
+    if (!isCurrent()) {
+      throw new Error('AMap coordinate conversion was superseded by newer data');
+    }
+    converted.push(...convertedBatch);
+    onBatch?.(convertedBatch, converted.length);
   }
   return converted;
 }

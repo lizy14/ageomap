@@ -6,6 +6,9 @@
   `AMap.convertFrom` API.
 - Convert GPS coordinates in batches, surface conversion failures and timeouts, and
   prevent stale conversion results from updating the map.
+- Prioritize markers, coarse route samples, and the newest route points; progressively
+  refine routes while showing conversion progress and retaining old overlays until the
+  preview is ready.
 
 ## 0.1.0
 

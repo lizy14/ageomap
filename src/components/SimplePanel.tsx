@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelProps, DataFrame, Field } from '@grafana/data';
+import { PanelProps, DataFrame, Field, FieldType } from '@grafana/data';
 import { useTheme2 } from '@grafana/ui';
 import { AMapOptions, SeriesMapping } from '../types';
 import { loadAMap } from '../amapLoader';
-import { convertGpsCoordinates, Coordinate } from '../amapConvert';
+import { convertGpsCoordinates, Coordinate, GPS_CONVERSION_BATCH_SIZE } from '../amapConvert';
+import { buildProgressiveConversionPlan, TimeOrderedPoint } from '../conversionPlan';
 
 interface Props extends PanelProps<AMapOptions> {}
 
@@ -24,6 +25,23 @@ function fieldByName(frame: DataFrame, name: string): Field | undefined {
 interface ParsedSeriesConfig {
   value: Record<string, Partial<SeriesMapping>>;
   error: string | null;
+}
+
+interface PreparedPoint extends TimeOrderedPoint {
+  coordinate: Coordinate;
+  converted?: Coordinate;
+}
+
+interface PreparedSeries {
+  frame: DataFrame;
+  kind: 'route' | 'marker';
+  cfg: Partial<SeriesMapping>;
+  points: PreparedPoint[];
+}
+
+interface ConversionProgress {
+  converted: number;
+  total: number;
 }
 
 function parseSeriesConfig(json: string): ParsedSeriesConfig {
@@ -91,6 +109,15 @@ export function coordinateAt(latField: Field, lonField: Field, index: number): C
   return [lon, lat];
 }
 
+function timestampAt(timeField: Field | undefined, index: number): number | undefined {
+  const value = timeField?.values[index];
+  if (value == null || (typeof value === 'string' && !value.trim())) {
+    return undefined;
+  }
+  const timestamp = typeof value === 'string' ? Date.parse(value) : Number(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
 export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) => {
   const theme = useTheme2();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -102,6 +129,7 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
   const drawVersionRef = useRef(0);
   const [mapVersion, setMapVersion] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
 
   const credentialsMissing = !options.amapKey || !options.amapSecurity;
   const seriesConfig = useMemo(() => parseSeriesConfig(options.seriesConfig), [options.seriesConfig]);
@@ -121,16 +149,15 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
     if (!AMap || !map) {
       return;
     }
-    overlaysRef.current.forEach((o) => map.remove(o));
-    overlaysRef.current = [];
+    const isCurrent = () => drawVersion === drawVersionRef.current && mapRef.current === map;
+    setLoadError(null);
+    if (seriesConfig.error) {
+      setConversionProgress(null);
+      return;
+    }
 
     const sc = seriesConfig.value;
-    const prepared: Array<{
-      frame: DataFrame;
-      kind: 'route' | 'marker';
-      cfg: Partial<SeriesMapping>;
-      points: Array<{ rowIndex: number; coordinate: Coordinate }>;
-    }> = [];
+    const prepared: PreparedSeries[] = [];
 
     (data.series || []).forEach((frame, idx) => {
       const refId = frame.refId || String(idx);
@@ -144,11 +171,12 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
       if (!latF || !lonF) {
         return;
       }
-      const points: Array<{ rowIndex: number; coordinate: Coordinate }> = [];
+      const timeField = frame.fields.find((field) => field.type === FieldType.time);
+      const points: PreparedPoint[] = [];
       for (let rowIndex = 0; rowIndex < latF.values.length; rowIndex++) {
         const coordinate = coordinateAt(latF, lonF, rowIndex);
         if (coordinate) {
-          points.push({ rowIndex, coordinate });
+          points.push({ rowIndex, coordinate, timestamp: timestampAt(timeField, rowIndex) });
         }
       }
       if (points.length) {
@@ -156,100 +184,187 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
       }
     });
 
-    const rawCoordinates = prepared.flatMap((series) => series.points.map((point) => point.coordinate));
-    let coordinates = rawCoordinates;
-    if (options.coordSystem !== 'gcj02') {
-      try {
-        coordinates = await convertGpsCoordinates(
-          AMap,
-          rawCoordinates,
-          () => drawVersion === drawVersionRef.current && mapRef.current === map
-        );
-      } catch (error) {
-        if (drawVersion === drawVersionRef.current && mapRef.current === map) {
-          setLoadError(error instanceof Error ? error.message : String(error));
+    const routeOverlays = new Map<PreparedSeries, any>();
+
+    const routePath = (series: PreparedSeries): Coordinate[] =>
+      series.points.flatMap((point) => (point.converted ? [point.converted] : []));
+
+    const createRouteOverlay = (series: PreparedSeries, path: Coordinate[]) =>
+      new AMap.Polyline({
+        path,
+        strokeColor: series.cfg.color || options.routeColor || '#1F60C4',
+        strokeWeight: series.cfg.lineWidth ?? options.routeWidth ?? 4,
+        strokeOpacity:
+          series.cfg.opacity != null
+            ? series.cfg.opacity
+            : options.routeOpacity != null
+              ? options.routeOpacity
+              : 0.6,
+        lineJoin: 'round',
+        lineCap: 'round',
+        zIndex: series.cfg.zIndex ?? 10,
+      });
+
+    const createMarkerOverlay = (series: PreparedSeries, point: PreparedPoint) => {
+      const pos = point.converted!;
+      const marker = new AMap.CircleMarker({
+        center: pos,
+        radius: series.cfg.radius ?? options.markerRadius ?? 5,
+        fillColor: series.cfg.color || options.markerColor || '#C4162A',
+        fillOpacity:
+          series.cfg.opacity != null
+            ? series.cfg.opacity
+            : options.markerOpacity != null
+              ? options.markerOpacity
+              : 0.8,
+        strokeColor: '#fff',
+        strokeWeight: 1,
+        strokeOpacity: 0.9,
+        cursor: 'pointer',
+        zIndex: series.cfg.zIndex ?? 100,
+        bubble: true,
+      });
+      const labelFields = (series.cfg.labelFields || '')
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => fieldByName(series.frame, name));
+      if (labelFields.length) {
+        let title = '';
+        labelFields.forEach((field) => {
+          if (!field) {
+            return;
+          }
+          let value: any = field.values[point.rowIndex];
+          if (value == null) {
+            return;
+          }
+          if (typeof value === 'number') {
+            value = Math.round(value) + (series.cfg.labelSuffix || '');
+          }
+          title += (title ? ' · ' : '') + value;
+        });
+        if (title) {
+          marker.on('mouseover', () => {
+            infoRef.current.setContent(createTooltipContent(title));
+            infoRef.current.open(map, pos);
+          });
+          marker.on('mouseout', () => infoRef.current.close());
         }
-        return;
       }
-    }
-    if (drawVersion !== drawVersionRef.current || mapRef.current !== map) {
+      return marker;
+    };
+
+    const fitOverlays = () => {
+      if (options.autoFit && overlaysRef.current.length) {
+        map.setFitView(overlaysRef.current, false, [24, 24, 24, 24]);
+      }
+    };
+
+    const replaceOverlaysWithPreview = () => {
+      const nextOverlays: any[] = [];
+      prepared.forEach((series) => {
+        if (series.kind === 'route') {
+          const path = routePath(series);
+          if (path.length > 1) {
+            const route = createRouteOverlay(series, path);
+            routeOverlays.set(series, route);
+            nextOverlays.push(route);
+          }
+        } else {
+          series.points.forEach((point) => {
+            if (point.converted) {
+              nextOverlays.push(createMarkerOverlay(series, point));
+            }
+          });
+        }
+      });
+
+      nextOverlays.forEach((overlay) => map.add(overlay));
+      infoRef.current?.close();
+      overlaysRef.current.forEach((overlay) => map.remove(overlay));
+      overlaysRef.current = nextOverlays;
+      fitOverlays();
+    };
+
+    const updateProgressiveRoutes = () => {
+      prepared.forEach((series) => {
+        if (series.kind !== 'route') {
+          return;
+        }
+        const path = routePath(series);
+        if (path.length < 2) {
+          return;
+        }
+        const route = routeOverlays.get(series);
+        if (route) {
+          route.setPath(path);
+        } else {
+          const newRoute = createRouteOverlay(series, path);
+          routeOverlays.set(series, newRoute);
+          overlaysRef.current.push(newRoute);
+          map.add(newRoute);
+        }
+      });
+    };
+
+    if (options.coordSystem === 'gcj02') {
+      prepared.forEach((series) => series.points.forEach((point) => (point.converted = point.coordinate)));
+      replaceOverlaysWithPreview();
+      setConversionProgress(null);
       return;
     }
-    setLoadError(null);
 
-    const overlays: any[] = [];
-    let coordinateIndex = 0;
+    const { previewPriority, conversionQueue } = buildProgressiveConversionPlan(
+      prepared,
+      GPS_CONVERSION_BATCH_SIZE
+    );
 
-    prepared.forEach(({ frame, kind, cfg, points }) => {
-      if (kind === 'route') {
-        const path = points.map(() => coordinates[coordinateIndex++]);
-        if (path.length > 1) {
-          const pl = new AMap.Polyline({
-            path,
-            strokeColor: cfg.color || options.routeColor || '#1F60C4',
-            strokeWeight: cfg.lineWidth ?? options.routeWidth ?? 4,
-            strokeOpacity: cfg.opacity != null ? cfg.opacity : options.routeOpacity != null ? options.routeOpacity : 0.6,
-            lineJoin: 'round',
-            lineCap: 'round',
-            zIndex: cfg.zIndex ?? 10,
+    if (!conversionQueue.length) {
+      replaceOverlaysWithPreview();
+      setConversionProgress(null);
+      return;
+    }
+
+    let previewRendered = false;
+    setConversionProgress({ converted: 0, total: conversionQueue.length });
+    try {
+      await convertGpsCoordinates(
+        AMap,
+        conversionQueue.map((point) => point.coordinate),
+        isCurrent,
+        (convertedBatch, convertedCount) => {
+          const start = convertedCount - convertedBatch.length;
+          convertedBatch.forEach((coordinate, index) => {
+            conversionQueue[start + index].converted = coordinate;
           });
-          map.add(pl);
-          overlays.push(pl);
-        }
-      } else {
-        const labelFieldNames = (cfg.labelFields || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const labelFields = labelFieldNames.map((nm) => fieldByName(frame, nm));
-        for (const point of points) {
-          const pos = coordinates[coordinateIndex++];
-          const cm = new AMap.CircleMarker({
-            center: pos,
-            radius: cfg.radius ?? options.markerRadius ?? 5,
-            fillColor: cfg.color || options.markerColor || '#C4162A',
-            fillOpacity: cfg.opacity != null ? cfg.opacity : options.markerOpacity != null ? options.markerOpacity : 0.8,
-            strokeColor: '#fff',
-            strokeWeight: 1,
-            strokeOpacity: 0.9,
-            cursor: 'pointer',
-            zIndex: cfg.zIndex ?? 100,
-            bubble: true,
-          });
-          map.add(cm);
-          overlays.push(cm);
-          if (labelFields.length) {
-            let title = '';
-            labelFields.forEach((f) => {
-              if (!f) {
-                return;
-              }
-              let v: any = f.values[point.rowIndex];
-              if (v == null) {
-                return;
-              }
-              if (typeof v === 'number') {
-                v = Math.round(v) + (cfg.labelSuffix || '');
-              }
-              title += (title ? ' · ' : '') + v;
-            });
-            if (title) {
-              cm.on('mouseover', () => {
-                infoRef.current.setContent(createTooltipContent(title));
-                infoRef.current.open(map, pos);
-              });
-              cm.on('mouseout', () => infoRef.current.close());
-            }
+          setConversionProgress({ converted: convertedCount, total: conversionQueue.length });
+          if (!previewRendered && convertedCount >= previewPriority.length) {
+            replaceOverlaysWithPreview();
+            previewRendered = true;
+          } else if (previewRendered) {
+            updateProgressiveRoutes();
           }
         }
+      );
+    } catch (error) {
+      if (isCurrent()) {
+        setConversionProgress(null);
+        setLoadError(error instanceof Error ? error.message : String(error));
       }
-    });
-
-    overlaysRef.current = overlays;
-    if (options.autoFit && overlays.length) {
-      map.setFitView(overlays, false, [24, 24, 24, 24]);
+      return;
     }
-  }, [data, options, seriesConfig.value]);
+    if (!isCurrent()) {
+      return;
+    }
+    if (!previewRendered) {
+      replaceOverlaysWithPreview();
+    } else {
+      updateProgressiveRoutes();
+    }
+    fitOverlays();
+    setConversionProgress(null);
+  }, [data, options, seriesConfig.error, seriesConfig.value]);
 
   // Load SDK and create the map instance once.
   useEffect(() => {
@@ -281,10 +396,12 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
           infoRef.current = new AMap.InfoWindow({ isCustom: false, offset: new AMap.Pixel(0, -6), autoMove: true });
         }
         setLoadError(null);
+        setConversionProgress(null);
         setMapVersion((version) => version + 1);
       })
       .catch((e) => {
         if (!cancelled) {
+          setConversionProgress(null);
           setLoadError(String(e.message || e));
         }
       });
@@ -387,6 +504,23 @@ export const SimplePanel: React.FC<Props> = ({ options, data, width, height }) =
           }}
         >
           Ageomap: {message}
+        </div>
+      )}
+      {conversionProgress && !message && (
+        <div
+          role="status"
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            color: '#fff',
+            background: 'rgba(0,0,0,0.65)',
+            padding: '6px 10px',
+            borderRadius: 4,
+            fontSize: 13,
+          }}
+        >
+          Ageomap: 正在转换坐标 {conversionProgress.converted} / {conversionProgress.total}
         </div>
       )}
     </div>

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "panel",
+  "name": "Ageomap",
+  "id": "lizy14-ageomap-panel",
+  "state": "beta",
+  "info": {
+    "keywords": [
+      "panel",
+      "map",
+      "amap",
+      "gaode",
+      "高德",
+      "china",
+      "gcj02"
+    ],
+    "description": "Render routes and markers on AMap / 高德地图 vector maps inside a Grafana panel, with optional WGS84 to GCJ02 conversion.",
+    "author": {
+      "name": "lizy14"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [
+      {
+        "name": "GitHub",
+        "url": "https://github.com/lizy14/ageomap"
+      },
+      {
+        "name": "Report an issue",
+        "url": "https://github.com/lizy14/ageomap/issues"
+      }
+    ],
+    "screenshots": [
+      {
+        "name": "Synthetic route on Ageomap",
+        "path": "img/screenshot.jpg"
+      }
+    ],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=12.3.0",
+    "plugins": []
+  }
+}

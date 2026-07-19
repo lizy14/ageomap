@@ -1,0 +1,88 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "trlxrdZVk"
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "amapKey": "",
+        "amapSecurity": "",
+        "autoFit": true,
+        "coordSystem": "wgs84",
+        "darkMapStyle": "dark",
+        "defaultZoom": 12,
+        "latField": "lat",
+        "lightMapStyle": "normal",
+        "lonField": "lon",
+        "mapStyle": "normal",
+        "markerColor": "#E11D48",
+        "markerOpacity": 0.9,
+        "markerRadius": 7,
+        "routeColor": "#2563EB",
+        "routeOpacity": 0.8,
+        "routeWidth": 5,
+        "seriesConfig": "{\"A\":{\"kind\":\"route\"},\"B\":{\"kind\":\"marker\",\"labelFields\":\"name,value\",\"labelSuffix\":\" units\"}}",
+        "showScale": true,
+        "showToolbar": false,
+        "themeMode": "follow"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "rawFrameContent": "[{\"columns\":[{\"text\":\"lat\",\"type\":\"number\"},{\"text\":\"lon\",\"type\":\"number\"}],\"rows\":[[31.2304,121.4737],[31.232,121.482],[31.2345,121.491],[31.2365,121.5],[31.238,121.51]]}]",
+          "refId": "A",
+          "scenarioId": "raw_frame"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "trlxrdZVk"
+          },
+          "rawFrameContent": "[{\"columns\":[{\"text\":\"lat\",\"type\":\"number\"},{\"text\":\"lon\",\"type\":\"number\"},{\"text\":\"name\",\"type\":\"string\"},{\"text\":\"value\",\"type\":\"number\"}],\"rows\":[[31.2304,121.4737,\"Synthetic Start\",12],[31.235,121.495,\"Synthetic Midpoint\",24],[31.238,121.51,\"Synthetic Finish\",36]]}]",
+          "refId": "B",
+          "scenarioId": "raw_frame"
+        }
+      ],
+      "title": "Ageomap synthetic demo",
+      "type": "lizy14-ageomap-panel"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 41,
+  "tags": [
+    "ageomap",
+    "synthetic"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Ageomap synthetic demo",
+  "uid": "ageomap-synthetic-demo",
+  "version": 1,
+  "weekStart": ""
+}
